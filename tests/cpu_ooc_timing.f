@@ -1,0 +1,10 @@
+r4000_top.v
+r4000_core.v
+r4000_alu.v
+r4000_muldiv.v
+r4000_fpu.v
+r4000_tlb.v
+r4000_icache.v
+r4000_dcache.v
+r4000_scache.v
+tests/r4000_core_l1_timing_top.v

@@ -1,0 +1,132 @@
+--- a/source/MIPS-legacy/specialize.h
++++ b/source/MIPS-legacy/specialize.h
+@@ -140,15 +140,17 @@
+ 
+ /*----------------------------------------------------------------------------
+ | The bit pattern for a default generated 32-bit floating-point NaN.
++| MIPS legacy: sign=0, exp=FF, bit22=0 (quiet), bits[21:0]=all 1s.
+ *----------------------------------------------------------------------------*/
+-#define defaultNaNF32UI 0xFFC00000
++#define defaultNaNF32UI 0x7FBFFFFF
+ 
+ /*----------------------------------------------------------------------------
+ | Returns true when 32-bit unsigned integer 'uiA' has the bit pattern of a
+ | 32-bit floating-point signaling NaN.
++| MIPS legacy: mantissa bit 22 = 1 means signaling NaN.
+ | Note:  This macro evaluates its argument more than once.
+ *----------------------------------------------------------------------------*/
+-#define softfloat_isSigNaNF32UI( uiA ) ((((uiA) & 0x7FC00000) == 0x7F800000) && ((uiA) & 0x003FFFFF))
++#define softfloat_isSigNaNF32UI( uiA ) ((((uiA) & 0x7F800000) == 0x7F800000) && ((uiA) & 0x00400000))
+ 
+ /*----------------------------------------------------------------------------
+ | Assuming 'uiA' has the bit pattern of a 32-bit floating-point NaN, converts
+@@ -175,15 +177,17 @@
+ 
+ /*----------------------------------------------------------------------------
+ | The bit pattern for a default generated 64-bit floating-point NaN.
++| MIPS legacy: sign=0, exp=7FF, bit51=0 (quiet), bits[50:0]=all 1s.
+ *----------------------------------------------------------------------------*/
+-#define defaultNaNF64UI UINT64_C( 0xFFF8000000000000 )
++#define defaultNaNF64UI UINT64_C( 0x7FF7FFFFFFFFFFFF )
+ 
+ /*----------------------------------------------------------------------------
+ | Returns true when 64-bit unsigned integer 'uiA' has the bit pattern of a
+ | 64-bit floating-point signaling NaN.
++| MIPS legacy: mantissa bit 51 = 1 means signaling NaN.
+ | Note:  This macro evaluates its argument more than once.
+ *----------------------------------------------------------------------------*/
+-#define softfloat_isSigNaNF64UI( uiA ) ((((uiA) & UINT64_C( 0x7FF8000000000000 )) == UINT64_C( 0x7FF0000000000000 )) && ((uiA) & UINT64_C( 0x0007FFFFFFFFFFFF )))
++#define softfloat_isSigNaNF64UI( uiA ) ((((uiA) & UINT64_C( 0x7FF0000000000000 )) == UINT64_C( 0x7FF0000000000000 )) && ((uiA) & UINT64_C( 0x0008000000000000 )))
+ 
+ /*----------------------------------------------------------------------------
+ | Assuming 'uiA' has the bit pattern of a 64-bit floating-point NaN, converts
+--- a/source/MIPS-legacy/s_commonNaNToF32UI.c
++++ b/source/MIPS-legacy/s_commonNaNToF32UI.c
+@@ -44,8 +44,14 @@
+ *----------------------------------------------------------------------------*/
+ uint_fast32_t softfloat_commonNaNToF32UI( const struct commonNaN *aPtr )
+ {
++    uint_fast32_t uiZ;
+ 
+-    return (uint_fast32_t) aPtr->sign<<31 | 0x7FC00000 | aPtr->v64>>41;
++    /* MIPS legacy: quiet NaN has bit 22 = 0; payload in bits [21:0] */
++    uiZ = (uint_fast32_t) aPtr->sign<<31 | 0x7F800000
++              | ((aPtr->v64>>41) & 0x003FFFFF);
++    /* Clearing the sole signaling bit must not turn a NaN into infinity. */
++    if ( ! (uiZ & 0x003FFFFF) ) uiZ = defaultNaNF32UI;
++    return uiZ;
+ 
+ }
+ 
+--- a/source/MIPS-legacy/s_commonNaNToF64UI.c
++++ b/source/MIPS-legacy/s_commonNaNToF64UI.c
+@@ -44,10 +44,17 @@
+ *----------------------------------------------------------------------------*/
+ uint_fast64_t softfloat_commonNaNToF64UI( const struct commonNaN *aPtr )
+ {
++    uint_fast64_t uiZ;
+ 
+-    return
+-        (uint_fast64_t) aPtr->sign<<63 | UINT64_C( 0x7FF8000000000000 )
+-            | aPtr->v64>>12;
++    /* MIPS legacy: quiet NaN has bit 51 = 0; payload in bits [50:0] */
++    uiZ =
++        (uint_fast64_t) aPtr->sign<<63 | UINT64_C( 0x7FF0000000000000 )
++            | ((aPtr->v64>>12) & UINT64_C( 0x0007FFFFFFFFFFFF ));
++    /* Clearing the sole signaling bit must not turn a NaN into infinity. */
++    if ( ! (uiZ & UINT64_C( 0x0007FFFFFFFFFFFF )) ) {
++        uiZ = defaultNaNF64UI;
++    }
++    return uiZ;
+ 
+ }
+ 
+--- a/source/MIPS-legacy/s_propagateNaNF32UI.c
++++ b/source/MIPS-legacy/s_propagateNaNF32UI.c
+@@ -51,13 +51,18 @@
+  softfloat_propagateNaNF32UI( uint_fast32_t uiA, uint_fast32_t uiB )
+ {
+     bool isSigNaNA;
++    uint_fast32_t uiZ;
+ 
+     isSigNaNA = softfloat_isSigNaNF32UI( uiA );
+     if ( isSigNaNA || softfloat_isSigNaNF32UI( uiB ) ) {
+         softfloat_raiseFlags( softfloat_flag_invalid );
+-        if ( isSigNaNA ) return uiA | 0x00400000;
++        if ( isSigNaNA ) {
++            uiZ = uiA & ~UINT32_C( 0x00400000 );
++            return (uiZ & UINT32_C( 0x003FFFFF )) ? uiZ : defaultNaNF32UI;
++        }
+     }
+-    return (isNaNF32UI( uiA ) ? uiA : uiB) | 0x00400000;
++    uiZ = (isNaNF32UI( uiA ) ? uiA : uiB) & ~UINT32_C( 0x00400000 );
++    return (uiZ & UINT32_C( 0x003FFFFF )) ? uiZ : defaultNaNF32UI;
+ 
+ }
+ 
+--- a/source/MIPS-legacy/s_propagateNaNF64UI.c
++++ b/source/MIPS-legacy/s_propagateNaNF64UI.c
+@@ -51,13 +51,21 @@
+  softfloat_propagateNaNF64UI( uint_fast64_t uiA, uint_fast64_t uiB )
+ {
+     bool isSigNaNA;
++    uint_fast64_t uiZ;
+ 
+     isSigNaNA = softfloat_isSigNaNF64UI( uiA );
+     if ( isSigNaNA || softfloat_isSigNaNF64UI( uiB ) ) {
+         softfloat_raiseFlags( softfloat_flag_invalid );
+-        if ( isSigNaNA ) return uiA | UINT64_C( 0x0008000000000000 );
++        if ( isSigNaNA ) {
++            uiZ = uiA & ~UINT64_C( 0x0008000000000000 );
++            return (uiZ & UINT64_C( 0x0007FFFFFFFFFFFF )) ?
++                uiZ : defaultNaNF64UI;
++        }
+     }
+-    return (isNaNF64UI( uiA ) ? uiA : uiB) | UINT64_C( 0x0008000000000000 );
++    uiZ = (isNaNF64UI( uiA ) ? uiA : uiB)
++              & ~UINT64_C( 0x0008000000000000 );
++    return (uiZ & UINT64_C( 0x0007FFFFFFFFFFFF )) ?
++        uiZ : defaultNaNF64UI;
+ 
+ }
+ 

@@ -1,0 +1,28 @@
+# Local build products
+build/
+sim/build/
+tests/build/
+tests/testfloat/build/
+obj_dir/
+**/obj_dir/
+
+# Optional third-party source trees
+third_party/
+
+# Generated objects and reports
+*.o
+*.a
+*.bin
+*.elf
+*.vcd
+*.fst
+*.rpt
+*.log
+
+# Language/editor caches
+__pycache__/
+*.py[cod]
+.DS_Store
+.vscode/
+*.swp
+*~
